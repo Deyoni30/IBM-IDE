@@ -25,7 +25,7 @@ class Transaction(models.Model):
 
 class Alerte(models.Model):      
     NIVEAU_CHOICES = [
-        ('Faible', 'Faible'),
+        ('FAIBLE', 'Faible'),
         ('MOYEN', 'Moyen'),
         ('ELEVE', 'Eleve'),
         ('CRITIQUE', 'Critique'),
