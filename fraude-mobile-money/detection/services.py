@@ -1,3 +1,7 @@
+import os
+
+from groq import Groq
+
 from .models import Transaction
 
 
@@ -55,3 +59,38 @@ def determiner_niveaux(score):
         0: None,
     }
     return levels.get(score)
+
+
+def generer_explication(transaction, score, niveau):
+    """
+    Call the Groq chat completions API to produce a short French explanation
+    (1–2 sentences) of why the transaction looks suspicious, aimed at a
+    non-technical fraud analyst.
+
+    Falls back to a safe string if the API key is absent or the call fails.
+    """
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        return f"Score {score}/4 - analyse automatique indisponible."
+
+    prompt = (
+        f"Tu es un expert en détection de fraude. Explique en 1 à 2 phrases courtes, "
+        f"en français et de façon accessible à un analyste non-technique, pourquoi la "
+        f"transaction suivante est suspecte.\n\n"
+        f"Type : {transaction.type}\n"
+        f"Montant : {transaction.amount}\n"
+        f"Solde expéditeur avant : {transaction.sender_old_balance}, après : {transaction.sender_new_balance}\n"
+        f"Solde destinataire avant : {transaction.receiver_old_balance}, après : {transaction.receiver_new_balance}\n"
+        f"Score de risque : {score}/4\n"
+        f"Niveau : {niveau}"
+    )
+
+    try:
+        client = Groq(api_key=api_key)
+        response = client.chat.completions.create(
+            model="openai/gpt-oss-20b",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content.strip()
+    except Exception:
+        return f"Score {score}/4 - analyse automatique indisponible."

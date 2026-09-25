@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Alerte, Transaction
-from .services import calculer_score, determiner_niveaux
+from .services import calculer_score, determiner_niveaux, generer_explication
 
 
 # ---------------------------------------------------------------------------
@@ -146,11 +146,13 @@ class UploadCSVView(APIView):
 
             if score >= 1:
                 niveau = determiner_niveaux(score)
-                Alerte.objects.create(
+                alerte = Alerte.objects.create(
                     transaction=transaction,
                     score=score,
                     niveau=niveau,
                 )
+                alerte.explication = generer_explication(transaction, score, niveau)
+                alerte.save(update_fields=["explication"])
                 niveau_counts[niveau] += 1
                 alerte_count += 1
 
