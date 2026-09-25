@@ -2,12 +2,70 @@ import io
 from collections import Counter
 
 import pandas as pd
+from rest_framework import serializers
+from rest_framework.generics import ListAPIView
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import Alerte, Transaction
 from .services import calculer_score, determiner_niveaux
+
+
+# ---------------------------------------------------------------------------
+# Serializers
+# ---------------------------------------------------------------------------
+
+class AlerteSerializer(serializers.ModelSerializer):
+    transaction_type = serializers.CharField(source="transaction.type", read_only=True)
+    transaction_amount = serializers.DecimalField(
+        source="transaction.amount", max_digits=15, decimal_places=2, read_only=True
+    )
+    transaction_sender_id = serializers.CharField(source="transaction.sender_id", read_only=True)
+    transaction_receiver_id = serializers.CharField(source="transaction.receiver_id", read_only=True)
+
+    class Meta:
+        model = Alerte
+        fields = [
+            "id",
+            "score",
+            "niveau",
+            "explication",
+            "created_at",
+            "transaction_type",
+            "transaction_amount",
+            "transaction_sender_id",
+            "transaction_receiver_id",
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Alerte list view
+# ---------------------------------------------------------------------------
+
+NIVEAU_VALUES = {"FAIBLE", "MOYEN", "ELEVE", "CRITIQUE"}
+
+
+class AlerteListView(ListAPIView):
+    """
+    GET /api/alertes/
+
+    Returns all Alerte objects ordered by created_at descending.
+    Optional query parameter:
+        niveau=FAIBLE|MOYEN|ELEVE|CRITIQUE  — filters to that level only.
+    Pagination: 20 items per page (DRF PageNumberPagination).
+    """
+
+    serializer_class = AlerteSerializer
+
+    def get_queryset(self):
+        qs = Alerte.objects.select_related("transaction").order_by("-created_at")
+        niveau = self.request.query_params.get("niveau")
+        if niveau is not None:
+            if niveau not in NIVEAU_VALUES:
+                return Alerte.objects.none()
+            qs = qs.filter(niveau=niveau)
+        return qs
 
 MAX_ROWS = 1000
 
