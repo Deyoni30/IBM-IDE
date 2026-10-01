@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="fr" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sentinel — Détection de fraude Mobile Money</title>
+
+  <!-- Tailwind Play CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink:      '#12101A',
+            card:     '#1A1724',
+            ember:    '#FF6B35',
+            signal:   '#00D9A3',
+            amber:    '#FFB627',
+            danger:   '#FF3B5C',
+            muted:    '#8B8699',
+            border:   '#2A2638',
+          },
+          fontFamily: {
+            display: ['"Sora"', 'sans-serif'],
+            body:    ['"Inter"', 'sans-serif'],
+            mono:    ['"JetBrains Mono"', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" />
+
+  <style>
+    /* ── base + dot-grain texture ── */
+    body {
+      background-color: #12101A;
+      color: #E8E4F0;
+      font-family: 'Inter', sans-serif;
+      background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0);
+      background-size: 24px 24px;
+    }
+
+    /* ── ambient glow blobs ── */
+    .glow-hero {
+      position: absolute;
+      width: 620px; height: 520px;
+      top: -120px; left: -80px;
+      background: radial-gradient(ellipse at center, rgba(255,107,53,0.10) 0%, transparent 70%);
+      filter: blur(80px);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .glow-stats {
+      position: absolute;
+      width: 340px; height: 260px;
+      bottom: -40px; left: 60px;
+      background: radial-gradient(ellipse at center, rgba(0,217,163,0.09) 0%, transparent 70%);
+      filter: blur(60px);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── scanline animation ── */
+    @keyframes scanline {
+      0%   { transform: translateY(-100%); opacity: 1; }
+      100% { transform: translateY(400%);  opacity: 0; }
+    }
+    .scanline-track {
+      position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit;
+    }
+    .scanline-track::after {
+      content: '';
+      position: absolute; left: 0; right: 0; top: 0;
+      height: 48px;
+      background: linear-gradient(to bottom, transparent, rgba(255,107,53,.35) 50%, transparent);
+      animation: scanline 2.4s linear infinite;
+    }
+    @media (prefers-reduced-motion: reduce) { .scanline-track::after { animation: none; } }
+
+    /* ── pulsing status dot ── */
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1;    box-shadow: 0 0 0 0 rgba(0,217,163,.5); }
+      50%       { opacity: .7;  box-shadow: 0 0 0 5px rgba(0,217,163,0); }
+    }
+    .pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+    @media (prefers-reduced-motion: reduce) { .pulse-dot { animation: none; } }
+
+    /* ── card entrance animation ── */
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(12px); }
+      to   { opacity: 1; transform: translateY(0);    }
+    }
+    .card-animate { animation: card-in .3s ease both; }
+    @media (prefers-reduced-motion: reduce) { .card-animate { animation: none; } }
+
+    /* ── upload spinner ── */
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { animation: spin .8s linear infinite; display: inline-block; }
+
+    /* ── focus rings ── */
+    :focus-visible { outline: 2px solid #FF6B35; outline-offset: 3px; border-radius: 4px; }
+
+    /* ── pill active state ── */
+    .pill-active { background-color: #FF6B35 !important; color: #12101A !important; font-weight: 600; }
+
+    /* ── drag-over visual ── */
+    .drag-over { border-color: #FF6B35 !important; background-color: rgba(255,107,53,.06) !important; }
+
+    /* ── tabular numbers ── */
+    .tabular { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+  </style>
+</head>
+
+<body class="min-h-full font-body">
+
+<!-- ═══════════════════════════════════════════════════════
+     HEADER
+═══════════════════════════════════════════════════════ -->
+<header class="sticky top-0 z-50 border-b border-border bg-ink/90 backdrop-blur-md">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 h-14 flex items-center justify-between">
+
+    <!-- Logo mark + wordmark -->
+    <div class="flex items-center gap-3">
+      <svg width="28" height="28" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+        <path d="M14 2L25.2 8.5V21.5L14 28L2.8 21.5V8.5L14 2Z" fill="#FF6B35" opacity=".15"/>
+        <path d="M14 2L25.2 8.5V21.5L14 28L2.8 21.5V8.5L14 2Z" stroke="#FF6B35" stroke-width="1.5"/>
+        <path d="M14 7L20.8 11V19L14 23L7.2 19V11L14 7Z" fill="#FF6B35" opacity=".3"/>
+        <circle cx="14" cy="15" r="3" fill="#FF6B35"/>
+      </svg>
+      <span class="font-display font-700 text-lg tracking-tight text-white">Sentinel</span>
+      <i class="fa-solid fa-circle-nodes text-ember/50 text-xs hidden sm:inline" aria-hidden="true"></i>
+      <span class="hidden sm:inline text-muted text-xs font-body border-l border-border pl-3 ml-1">Mobile Money Fraud Detection</span>
+    </div>
+
+    <!-- API status -->
+    <div class="flex items-center gap-2 text-xs text-muted font-body">
+      <span class="pulse-dot w-2 h-2 rounded-full bg-signal inline-block"></span>
+      <span id="api-status">API connectée</span>
+    </div>
+
+  </div>
+</header>
+
+
+<!-- ═══════════════════════════════════════════════════════
+     HERO — headline + stats | upload zone
+═══════════════════════════════════════════════════════ -->
+<section class="mx-auto max-w-6xl px-4 sm:px-6 pt-12 pb-10">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
+    <!-- Left: headline + stat tiles -->
+    <div class="relative">
+      <!-- Ember glow behind headline -->
+      <div class="glow-hero" aria-hidden="true"></div>
+      <!-- Signal glow near stat tiles -->
+      <div class="glow-stats" aria-hidden="true"></div>
+      <p class="relative z-10 text-muted text-sm font-body mb-3">Orange Money · MTN MoMo · Transactions mobiles</p>
+      <h1 class="relative z-10 font-display font-extrabold text-4xl sm:text-5xl leading-tight text-white mb-4">
+        Détectez la fraude<br/>avant qu'elle disparaisse.
+      </h1>
+      <p class="relative z-10 text-muted text-base leading-relaxed max-w-md mb-8">
+        Chaque transaction est scorée en temps réel selon quatre signaux comportementaux,
+        puis expliquée en langage naturel par un modèle de langage. Importez un fichier CSV
+        PaySim pour voir Sentinel à l'œuvre.
+      </p>
+
+      <!-- Stat tiles -->
+      <div class="relative z-10 grid grid-cols-3 gap-3">
+        <div class="bg-card border border-border rounded-lg p-4">
+          <div class="font-mono text-2xl font-500 text-ember tabular mb-1">98 %</div>
+          <div class="text-muted text-xs leading-snug">Recall sur fraudes PaySim</div>
+        </div>
+        <div class="bg-card border border-border rounded-lg p-4">
+          <div class="font-mono text-2xl font-500 text-signal tabular mb-1">100 %</div>
+          <div class="text-muted text-xs leading-snug">Précision au score 4</div>
+        </div>
+        <div class="bg-card border border-border rounded-lg p-4">
+          <div class="font-mono text-2xl font-500 tabular mb-1 text-white">4,6 M</div>
+          <div class="text-muted text-xs leading-snug">Transactions calibrées</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: upload zone -->
+    <div>
+      <div
+        id="upload-zone"
+        tabindex="0"
+        role="button"
+        aria-label="Zone de dépôt CSV — cliquer ou glisser-déposer un fichier"
+        class="relative bg-card border-2 border-dashed border-border rounded-xl p-8 flex flex-col items-center justify-center min-h-[220px] cursor-pointer transition-colors duration-200 focus-visible:border-ember"
+      >
+        <!-- Scanline effect -->
+        <div class="scanline-track rounded-xl"></div>
+
+        <!-- Default state -->
+        <div id="upload-idle" class="flex flex-col items-center text-center gap-3 z-10">
+          <i class="fa-solid fa-cloud-arrow-up text-4xl text-ember/70" aria-hidden="true"></i>
+          <div>
+            <p class="text-white font-body font-medium text-sm">Glissez un fichier CSV ici</p>
+            <p class="text-muted text-xs mt-1">ou cliquez pour parcourir vos fichiers · Format PaySim</p>
+          </div>
+          <span class="mt-1 text-xs font-mono text-ember/70">nameOrig · nameDest · amount · type · balances</span>
+        </div>
+
+        <!-- Loading state (hidden by default) -->
+        <div id="upload-loading" class="hidden flex-col items-center text-center gap-4 z-10">
+          <div class="spinner w-8 h-8 border-2 border-border border-t-ember rounded-full"></div>
+          <p id="loading-message" class="text-white text-sm font-body font-medium"></p>
+        </div>
+
+        <!-- Hidden file input -->
+        <input id="file-input" type="file" accept=".csv" class="hidden" aria-hidden="true" />
+      </div>
+
+      <!-- Inline error -->
+      <div id="upload-error" class="hidden mt-3 px-4 py-3 bg-danger/10 border border-danger/40 rounded-lg text-danger text-sm font-body" role="alert"></div>
+
+      <!-- Uploaded filename confirmation -->
+      <div id="upload-success-note" class="hidden mt-3 px-4 py-3 bg-signal/10 border border-signal/30 rounded-lg text-signal text-sm font-body"></div>
+    </div>
+
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════
+     SUMMARY STRIP (hidden until first upload)
+═══════════════════════════════════════════════════════ -->
+<section id="summary-strip" class="hidden mx-auto max-w-6xl px-4 sm:px-6 pb-8">
+  <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+    <div class="bg-card border border-border rounded-lg px-5 py-4">
+      <div id="sum-total" class="font-mono text-3xl font-500 tabular text-white mb-1">—</div>
+      <div class="text-muted text-xs">Transactions traitées</div>
+    </div>
+    <div class="bg-card border border-danger/40 rounded-lg px-5 py-4">
+      <div id="sum-critique" class="font-mono text-3xl font-500 tabular text-danger mb-1">—</div>
+      <div class="text-muted text-xs">Critique</div>
+    </div>
+    <div class="bg-card border border-amber/40 rounded-lg px-5 py-4">
+      <div id="sum-eleve" class="font-mono text-3xl font-500 tabular text-amber mb-1">—</div>
+      <div class="text-muted text-xs">Élevé</div>
+    </div>
+    <div class="bg-card border border-signal/30 rounded-lg px-5 py-4">
+      <div id="sum-low" class="font-mono text-3xl font-500 tabular text-signal mb-1">—</div>
+      <div class="text-muted text-xs">Moyen + Faible</div>
+    </div>
+  </div>
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════
+     ALERTES SECTION
+═══════════════════════════════════════════════════════ -->
+<section class="mx-auto max-w-6xl px-4 sm:px-6 pb-20">
+
+  <!-- Section header + filter pills -->
+  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+    <div>
+      <h2 class="font-display font-700 text-xl text-white">Alertes</h2>
+      <p id="alerte-count-label" class="text-muted text-xs mt-0.5">Chargement…</p>
+    </div>
+
+    <div id="filter-pills" class="flex flex-wrap gap-2" role="group" aria-label="Filtrer par niveau">
+      <button data-niveau=""         class="pill pill-active  px-3 py-1.5 rounded-full text-xs font-body border border-border bg-card transition-colors">Toutes</button>
+      <button data-niveau="CRITIQUE" class="pill px-3 py-1.5 rounded-full text-xs font-body border border-border bg-card text-muted transition-colors hover:border-danger hover:text-danger">Critique</button>
+      <button data-niveau="ELEVE"    class="pill px-3 py-1.5 rounded-full text-xs font-body border border-border bg-card text-muted transition-colors hover:border-amber hover:text-amber">Élevé</button>
+      <button data-niveau="MOYEN"    class="pill px-3 py-1.5 rounded-full text-xs font-body border border-border bg-card text-muted transition-colors hover:border-amber/60 hover:text-amber/80">Moyen</button>
+      <button data-niveau="FAIBLE"   class="pill px-3 py-1.5 rounded-full text-xs font-body border border-border bg-card text-muted transition-colors hover:border-signal hover:text-signal">Faible</button>
+    </div>
+  </div>
+
+  <!-- List -->
+  <div id="alerte-list" class="flex flex-col gap-3"></div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="hidden flex flex-col items-center justify-center py-20 text-center gap-4">
+    <i class="fa-solid fa-shield-halved text-5xl text-border" aria-hidden="true"></i>
+    <p class="text-muted text-sm">Aucune alerte pour l'instant.</p>
+    <p class="text-muted/60 text-xs max-w-xs">Importez un fichier CSV PaySim via la zone ci-dessus pour lancer l'analyse.</p>
+  </div>
+
+  <!-- Alertes fetch error -->
+  <div id="list-error" class="hidden px-4 py-3 bg-danger/10 border border-danger/40 rounded-lg text-danger text-sm font-body" role="alert"></div>
+
+  <!-- Load-more button -->
+  <div class="mt-6 flex justify-center">
+    <button
+      id="load-more-btn"
+      class="hidden px-6 py-2.5 rounded-lg border border-border bg-card text-sm text-white font-body hover:border-ember hover:text-ember transition-colors focus-visible:border-ember"
+    >
+      Charger plus
+    </button>
+    <div id="load-more-error" class="hidden text-danger text-xs text-center mt-2 font-body"></div>
+  </div>
+
+</section>
+
+
+<!-- ═══════════════════════════════════════════════════════
+     JAVASCRIPT
+═══════════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ── DOM references ───────────────────────────────────────────────────────────
+const uploadZone       = document.getElementById('upload-zone');
+const fileInput        = document.getElementById('file-input');
+const uploadIdle       = document.getElementById('upload-idle');
+const uploadLoading    = document.getElementById('upload-loading');
+const loadingMessage   = document.getElementById('loading-message');
+const uploadError      = document.getElementById('upload-error');
+const uploadSuccessNote= document.getElementById('upload-success-note');
+const summaryStrip     = document.getElementById('summary-strip');
+const alerteList       = document.getElementById('alerte-list');
+const emptyState       = document.getElementById('empty-state');
+const listError        = document.getElementById('list-error');
+const filterPills      = document.querySelectorAll('.pill');
+const loadMoreBtn      = document.getElementById('load-more-btn');
+const loadMoreError    = document.getElementById('load-more-error');
+const alerteCountLabel = document.getElementById('alerte-count-label');
+const apiStatus        = document.getElementById('api-status');
+
+// ── State ────────────────────────────────────────────────────────────────────
+let nextPageUrl      = null;   // URL for DRF's next page
+let activeNiveau     = '';     // current filter value ('', 'CRITIQUE', …)
+let isFirstUploadRender = false; // flag to stagger-animate only on fresh upload
+
+// ── Utility: read CSRF cookie ─────────────────────────────────────────────────
+/**
+ * Extracts the csrftoken value from document.cookie.
+ * Required by Django for POST requests.
+ */
+function getCsrfToken() {
+  const match = document.cookie.match(/(?:^|;\s*)csrftoken=([^;]+)/);
+  return match ? match[1] : '';
+}
+
+// ── Utility: niveau → colour class mappings ───────────────────────────────────
+const NIVEAU_COLORS = {
+  CRITIQUE: { text: 'text-danger',  border: 'border-danger/40',  bg: 'bg-danger/15'  },
+  ELEVE:    { text: 'text-amber',   border: 'border-amber/40',   bg: 'bg-amber/15'   },
+  MOYEN:    { text: 'text-amber/70',border: 'border-amber/30',   bg: 'bg-amber/10'   },
+  FAIBLE:   { text: 'text-signal',  border: 'border-signal/30',  bg: 'bg-signal/10'  },
+};
+function niveauColor(niveau) {
+  return NIVEAU_COLORS[niveau] || { text: 'text-muted', border: 'border-border', bg: 'bg-card' };
+}
+
+// ── Utility: format amount as locale string ───────────────────────────────────
+function formatAmount(raw) {
+  const n = parseFloat(raw);
+  if (isNaN(n)) return raw;
+  return n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// ── Utility: format ISO timestamp to readable French date ────────────────────
+function formatDate(iso) {
+  try {
+    return new Date(iso).toLocaleString('fr-FR', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  } catch { return iso; }
+}
+
+// ── Utility: truncate long IDs for display ────────────────────────────────────
+function shortId(id) {
+  if (!id) return '—';
+  return id.length > 14 ? id.slice(0, 6) + '…' + id.slice(-4) : id;
+}
+
+// ── renderAlertCard(alerte, animate) ─────────────────────────────────────────
+/**
+ * Builds and returns a DOM element for a single Alerte object.
+ * animate=true adds the card-animate class for staggered entrance.
+ */
+function renderAlertCard(alerte, animate) {
+  const c = niveauColor(alerte.niveau);
+  const score = alerte.score || 0;
+
+  // Score dots (4 total, filled up to score value)
+  let dots = '';
+  for (let i = 1; i <= 4; i++) {
+    const filled = i <= score;
+    dots += `<span class="inline-block w-2 h-2 rounded-full ${filled ? c.text.replace('text-', 'bg-') : 'bg-border'}"></span>`;
+  }
+
+  // AI badge — muted if fallback, ember if real Groq output
+  const isFallback = alerte.explication && alerte.explication.includes('indisponible');
+  const aiBadgeColor = isFallback ? 'text-muted border-border' : 'text-ember border-ember/40';
+  const aiBadgeLabel = isFallback ? 'Fallback' : 'Analyse IA';
+  const aiIcon = isFallback
+    ? `<i class="fa-solid fa-circle-info text-[10px]" aria-hidden="true"></i>`
+    : `<i class="fa-solid fa-sparkles text-[10px]" aria-hidden="true"></i>`;
+
+  const card = document.createElement('article');
+  card.className = `bg-card border ${c.border} rounded-xl p-5 ${animate ? 'card-animate' : ''}`;
+
+  card.innerHTML = `
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+
+      <!-- Left: niveau + score + flow -->
+      <div class="flex-1 min-w-0">
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          <!-- Niveau badge -->
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-body font-600 ${c.bg} ${c.text} border ${c.border}">
+            ${alerte.niveau}
+          </span>
+          <!-- Score dots -->
+          <span class="flex items-center gap-1" title="Score ${score}/4" aria-label="Score ${score} sur 4">
+            ${dots}
+          </span>
+          <!-- Transaction type -->
+          <span class="text-muted text-xs font-mono border border-border px-2 py-0.5 rounded">${alerte.transaction_type || '—'}</span>
+        </div>
+
+        <!-- Sender → Receiver -->
+        <div class="flex items-center gap-2 mb-3 min-w-0">
+          <span class="font-mono text-sm text-white truncate" title="${alerte.transaction_sender_id}">${shortId(alerte.transaction_sender_id)}</span>
+          <i class="fa-solid fa-arrow-right shrink-0 text-muted text-xs" aria-hidden="true"></i>
+          <span class="font-mono text-sm text-white truncate" title="${alerte.transaction_receiver_id}">${shortId(alerte.transaction_receiver_id)}</span>
+        </div>
+
+        <!-- AI badge + explication -->
+        <div>
+          <span class="inline-flex items-center gap-1 text-[10px] font-body uppercase tracking-wide border rounded px-1.5 py-0.5 mb-1.5 ${aiBadgeColor}">
+            ${aiIcon} ${aiBadgeLabel}
+          </span>
+          <p class="text-sm text-white/80 leading-relaxed">${alerte.explication || '—'}</p>
+        </div>
+      </div>
+
+      <!-- Right: amount + timestamp -->
+      <div class="sm:text-right shrink-0 sm:pl-4">
+        <div class="font-mono text-2xl font-500 tabular ${c.text} mb-1">
+          ${formatAmount(alerte.transaction_amount)} <span class="text-muted text-sm font-normal">FCFA</span>
+        </div>
+        <time class="text-muted text-xs" datetime="${alerte.created_at}">${formatDate(alerte.created_at)}</time>
+      </div>
+
+    </div>
+  `;
+
+  return card;
+}
+
+// ── showListError / hideListError ─────────────────────────────────────────────
+function showListError(msg) {
+  listError.textContent = msg;
+  listError.classList.remove('hidden');
+}
+function hideListError() {
+  listError.classList.add('hidden');
+}
+
+// ── fetchAlertes(url, append, animate) ───────────────────────────────────────
+/**
+ * Fetches alerts from the given URL.
+ * append=true adds cards to the existing list (pagination).
+ * animate=true triggers staggered entrance animation.
+ */
+async function fetchAlertes(url, append = false, animate = false) {
+  hideListError();
+  if (!append) alerteList.innerHTML = '';
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Erreur HTTP ${res.status}`);
+    const data = await res.json();
+
+    const results = data.results || [];
+    nextPageUrl   = data.next || null;
+    const total   = data.count || 0;
+
+    // Update count label
+    const levelLabel = activeNiveau ? ` · filtre : ${activeNiveau}` : '';
+    alerteCountLabel.textContent = `${total} alerte${total !== 1 ? 's' : ''}${levelLabel}`;
+
+    // Render cards
+    results.forEach((alerte, i) => {
+      const card = renderAlertCard(alerte, animate);
+      if (animate) card.style.animationDelay = `${i * 40}ms`;
+      alerteList.appendChild(card);
+    });
+
+    // Empty state
+    if (!append && results.length === 0) {
+      emptyState.classList.remove('hidden');
+    } else {
+      emptyState.classList.add('hidden');
+    }
+
+    // Load-more button
+    if (nextPageUrl) {
+      loadMoreBtn.classList.remove('hidden');
+    } else {
+      loadMoreBtn.classList.add('hidden');
+    }
+
+    // Update API status
+    apiStatus.textContent = 'API connectée';
+
+  } catch (err) {
+    showListError(`Impossible de récupérer les alertes : ${err.message}`);
+    apiStatus.textContent = 'Erreur API';
+    alerteCountLabel.textContent = '';
+    emptyState.classList.remove('hidden');
+  }
+}
+
+// ── Filter pills ─────────────────────────────────────────────────────────────
+/**
+ * Handles filter pill clicks: updates active style and re-fetches alerts.
+ */
+filterPills.forEach(pill => {
+  pill.addEventListener('click', () => {
+    filterPills.forEach(p => p.classList.remove('pill-active'));
+    pill.classList.add('pill-active');
+    activeNiveau = pill.dataset.niveau;
+    const url = activeNiveau
+      ? `/api/alertes/?niveau=${activeNiveau}`
+      : '/api/alertes/';
+    fetchAlertes(url, false, false);  // no stagger on filter change
+  });
+});
+
+// ── Load-more pagination ──────────────────────────────────────────────────────
+loadMoreBtn.addEventListener('click', async () => {
+  if (!nextPageUrl) return;
+  loadMoreBtn.disabled = true;
+  loadMoreBtn.textContent = 'Chargement…';
+  loadMoreError.classList.add('hidden');
+  try {
+    await fetchAlertes(nextPageUrl, true, false);
+  } catch {
+    loadMoreError.textContent = 'Impossible de charger la page suivante.';
+    loadMoreError.classList.remove('hidden');
+  } finally {
+    loadMoreBtn.disabled = false;
+    loadMoreBtn.textContent = 'Charger plus';
+  }
+});
+
+// ── cycleLoadingMessages(intervalRef) ────────────────────────────────────────
+/**
+ * Starts cycling through a sequence of French status messages ~every 800ms.
+ * Returns the interval ID so the caller can clear it.
+ */
+function cycleLoadingMessages() {
+  const messages = [
+    'Lecture du CSV…',
+    'Calcul des scores de risque…',
+    'Groq (openai/gpt-oss-20b) rédige les explications…',
+    'Finalisation des alertes…',
+  ];
+  let idx = 0;
+  loadingMessage.textContent = messages[0];
+  return setInterval(() => {
+    idx = (idx + 1) % messages.length;
+    loadingMessage.textContent = messages[idx];
+  }, 800);
+}
+
+// ── setUploadState(loading) ───────────────────────────────────────────────────
+function setUploadState(loading) {
+  if (loading) {
+    uploadIdle.classList.add('hidden');
+    uploadLoading.classList.remove('hidden');
+    uploadLoading.classList.add('flex');
+  } else {
+    uploadLoading.classList.add('hidden');
+    uploadLoading.classList.remove('flex');
+    uploadIdle.classList.remove('hidden');
+  }
+}
+
+// ── handleUpload(file) ────────────────────────────────────────────────────────
+/**
+ * POSTs the CSV file to /api/upload/, drives loading state + message cycling,
+ * updates the summary strip, and reloads the alert list on success.
+ */
+async function handleUpload(file) {
+  if (!file || !file.name.endsWith('.csv')) {
+    uploadError.textContent = 'Veuillez sélectionner un fichier au format .csv';
+    uploadError.classList.remove('hidden');
+    return;
+  }
+
+  // Reset UI
+  uploadError.classList.add('hidden');
+  uploadSuccessNote.classList.add('hidden');
+  setUploadState(true);
+
+  const cycleId = cycleLoadingMessages();
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/upload/', {
+      method:  'POST',
+      headers: { 'X-CSRFToken': getCsrfToken() },
+      body:    formData,
+    });
+
+    clearInterval(cycleId);
+
+    if (!res.ok) {
+      let errMsg = `Erreur HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        errMsg = body.error || errMsg;
+      } catch { /* keep HTTP status message */ }
+      throw new Error(errMsg);
+    }
+
+    const data = await res.json();
+
+    // Update summary strip
+    document.getElementById('sum-total').textContent    = (data.total    || 0).toLocaleString('fr-FR');
+    document.getElementById('sum-critique').textContent = (data.breakdown?.CRITIQUE || 0).toLocaleString('fr-FR');
+    document.getElementById('sum-eleve').textContent    = (data.breakdown?.ELEVE    || 0).toLocaleString('fr-FR');
+    const low = (data.breakdown?.MOYEN || 0) + (data.breakdown?.FAIBLE || 0);
+    document.getElementById('sum-low').textContent      = low.toLocaleString('fr-FR');
+    summaryStrip.classList.remove('hidden');
+
+    // Success note
+    uploadSuccessNote.textContent = `✓ ${file.name} — ${data.total} transaction${data.total !== 1 ? 's' : ''} traitée${data.total !== 1 ? 's' : ''}, ${data.alertes} alerte${data.alertes !== 1 ? 's' : ''} créée${data.alertes !== 1 ? 's' : ''}.`;
+    uploadSuccessNote.classList.remove('hidden');
+
+    // Reload alert list with stagger animation (upload-only behaviour)
+    isFirstUploadRender = true;
+    const listUrl = activeNiveau ? `/api/alertes/?niveau=${activeNiveau}` : '/api/alertes/';
+    await fetchAlertes(listUrl, false, true);
+
+  } catch (err) {
+    clearInterval(cycleId);
+    uploadError.textContent = err.message;
+    uploadError.classList.remove('hidden');
+  } finally {
+    setUploadState(false);
+    fileInput.value = '';
+  }
+}
+
+// ── Upload zone — click to browse ─────────────────────────────────────────────
+uploadZone.addEventListener('click', () => fileInput.click());
+uploadZone.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) handleUpload(fileInput.files[0]);
+});
+
+// ── Upload zone — drag and drop ───────────────────────────────────────────────
+uploadZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  uploadZone.classList.add('drag-over');
+});
+['dragleave', 'dragend'].forEach(evt =>
+  uploadZone.addEventListener(evt, () => uploadZone.classList.remove('drag-over'))
+);
+uploadZone.addEventListener('drop', e => {
+  e.preventDefault();
+  uploadZone.classList.remove('drag-over');
+  const file = e.dataTransfer?.files[0];
+  if (file) handleUpload(file);
+});
+
+// ── Initial load ──────────────────────────────────────────────────────────────
+fetchAlertes('/api/alertes/', false, false);
+</script>
+
+</body>
+</html>

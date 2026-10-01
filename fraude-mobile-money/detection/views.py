@@ -1,7 +1,9 @@
 import io
+import time
 from collections import Counter
 
 import pandas as pd
+from django.shortcuts import render
 from rest_framework import serializers
 from rest_framework.generics import ListAPIView
 from rest_framework.parsers import MultiPartParser
@@ -10,6 +12,10 @@ from rest_framework.views import APIView
 
 from .models import Alerte, Transaction
 from .services import calculer_score, determiner_niveaux, generer_explication
+
+
+def demo_view(request):
+    return render(request, "detection/demo.html")
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +159,7 @@ class UploadCSVView(APIView):
                 )
                 alerte.explication = generer_explication(transaction, score, niveau)
                 alerte.save(update_fields=["explication"])
+                time.sleep(0.3)  # brief pause to stay under Groq rate limits
                 niveau_counts[niveau] += 1
                 alerte_count += 1
 

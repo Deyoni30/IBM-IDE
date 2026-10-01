@@ -1,6 +1,10 @@
+import logging
 import os
+import time
 
 from groq import Groq
+
+logger = logging.getLogger(__name__)
 
 from .models import Transaction
 
@@ -85,12 +89,29 @@ def generer_explication(transaction, score, niveau):
         f"Niveau : {niveau}"
     )
 
-    try:
-        client = Groq(api_key=api_key)
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return f"Score {score}/4 - analyse automatique indisponible."
+    client = Groq(api_key=api_key)
+    last_exc = None
+
+    for attempt in range(1, 4):  # max 3 attempts
+        try:
+            response = client.chat.completions.create(
+                model="openai/gpt-oss-20b",
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as exc:
+            last_exc = exc
+            exc_str = str(exc)
+            is_rate_limit = "429" in exc_str or "rate" in exc_str.lower()
+            if is_rate_limit and attempt < 3:
+                logger.warning(
+                    "Groq call failed (rate limit, attempt %d/3): %s — retrying in 2 s",
+                    attempt, exc,
+                )
+                time.sleep(2)
+            else:
+                # Non-rate-limit error, or last attempt: stop immediately
+                break
+
+    logger.warning("Groq call failed: %s", last_exc)
+    return f"Score {score}/4 - analyse automatique indisponible."
